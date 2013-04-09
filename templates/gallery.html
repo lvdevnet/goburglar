@@ -1,0 +1,25 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html>
+<head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+    <title>Go ! Images</title>
+    <!--<link type="text/css" rel="stylesheet" href="/static/styles.css"/>-->
+    <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+    <script type="text/javascript" src="/static/burglar.js"></script>
+    <script type="text/javascript" src="/_ah/channel/jsapi"></script>
+    <script type="text/javascript">
+        $(document).ready(function() {
+            channel = new goog.appengine.Channel({{.}});
+            socket = channel.open();
+            images = $('#images')
+            socket.onmessage = function(msg) {
+                images.append('<img style="display: none;" onload="$(this).fadeIn()" src="' + msg.data + '"/>')
+            };
+        });
+    </script>
+</head>
+<body>
+    <a href="/reset">Start over</a>
+    <div id="images"></div>
+</body>
+</html>
