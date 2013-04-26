@@ -11,7 +11,7 @@
         $(document).ready(function() {
             channel = new goog.appengine.Channel({{.}});
             socket = channel.open();
-            images = $('#images')
+            var images = $('#images');
             socket.onmessage = function(msg) {
                 images.append('<img style="display: none;" onload="$(this).fadeIn()" src="' + msg.data + '"/>')
             };

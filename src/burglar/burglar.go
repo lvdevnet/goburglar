@@ -101,7 +101,7 @@ func delete(clientId string, c appengine.Context) {
 }
 
 func gallery(token string, c appengine.Context, w http.ResponseWriter) {
-	if (templates == nil) {
+	if templates == nil {
 		var err error
 		templates, err = template.ParseFiles("templates/gallery.html")
 		if error3(err, c, w) { return }
