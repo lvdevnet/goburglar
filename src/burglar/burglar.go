@@ -53,7 +53,7 @@ type Request struct {
 
 type Thumbnail struct {
 	ThumbnailURL string
-	Blob appengine.BlobKey // BlobKey is string
+	Blob         appengine.BlobKey // BlobKey is string
 }
 
 var templates *template.Template = nil
