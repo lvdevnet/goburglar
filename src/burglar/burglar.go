@@ -27,6 +27,7 @@ func init() {
 	http.HandleFunc("/fetch", fetch)
 	http.HandleFunc("/reset", reset)
 	http.HandleFunc("/_ah/channel/connected/", connected)
+	http.HandleFunc("/cleanup", cleanup)
 }
 
 func error2(err error, c appengine.Context) bool {
@@ -97,7 +98,7 @@ func reset(w http.ResponseWriter, r *http.Request) {
 
 func delete(clientId string, c appengine.Context) {
 	c.Infof("deleting '%v'", clientId)
-	iterate(clientId, c, "delete")
+	iterate(&clientId, c, "delete")
 }
 
 func gallery(token string, c appengine.Context, w http.ResponseWriter) {
@@ -112,46 +113,88 @@ func gallery(token string, c appengine.Context, w http.ResponseWriter) {
 
 func images(clientId string, c appengine.Context) {
 	c.Infof("images for '%v'", clientId)
-	iterate(clientId, c, "send")
+	iterate(&clientId, c, "send")
 }
 
-func iterate(clientId string, c appengine.Context, op string) {
-	root := datastore.NewQuery(rootNode).Filter("ClientId = ", clientId).Run(c)
-	var keys []*datastore.Key
+func cleanup(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+	c.Infof("data/blobstore cleanup")
+	iterate(nil, c, "delete")
+}
+
+func iterate(clientId *string, c appengine.Context, op string) {
+	var rkeys []*datastore.Key
+	var allKeys []*datastore.Key
+	var allBlobs []appengine.BlobKey
+	q := datastore.NewQuery(rootNode)
+	if clientId != nil { // not cleanup
+		q = q.Filter("ClientId = ", *clientId)
+	}
+	root := q.Run(c)
 	for {
 		var parent Request
-		rootKey, err := root.Next(&parent)
+		key, err := root.Next(&parent)
 		if err == datastore.Done {
 			break
 		}
 		if error2(err, c) { return }
-		thumbnails := datastore.NewQuery(thumbnailLeaf).Ancestor(rootKey).Run(c)
-		for {
-			var thumbnail Thumbnail
-			key, err := thumbnails.Next(&thumbnail)
-			if err == datastore.Done {
-				break
-			}
-			if error2(err, c) { return }
-			if op == "send" {
-				c.Infof("pushing from db '%v'", thumbnail.ThumbnailURL)
-				channel.Send(c, clientId, thumbnail.ThumbnailURL)
-			} else if op == "delete" {
-				c.Infof("deleting thumbnail from db '%v'", key)
-				keys = append(keys, key)
-				err := image.DeleteServingURL(c, thumbnail.Blob)
-				error2(err, c)
-			}
-		}
+		rkeys = append(rkeys, key)
+	}
+	if clientId == nil { // cleanup
+		allKeys = append(allKeys, rkeys...)
+		rkeys = []*datastore.Key{ nil }
+	}
+	for _, rkey := range rkeys {
+		err, tkeys, blobs := iterate2(clientId, rkey, c, op)
 		if op == "delete" {
-			c.Infof("deleting request from db '%v'", rootKey)
-			keys = append(keys, rootKey)
+			if rkey != nil {
+				c.Infof("deleting request from db '%v'", rkey)
+			} else {
+				c.Infof("deleting all requests from db")		
+			}
+			allKeys = append(allKeys, *tkeys...)
+			allBlobs = append(allBlobs, *blobs...)
 		}
+		if error2(err, c) { break }
 	}
 	if op == "delete" {
-		err := datastore.DeleteMulti(c, keys) // deleting parent deletes children entities?
+		err := blobstore.DeleteMulti(c, allBlobs)
+		error2(err, c)
+		if clientId != nil {
+			allKeys = append(allKeys, rkeys...)
+		}
+		err = datastore.DeleteMulti(c, allKeys) // deleting parent deletes ancestors? -- No
 		error2(err, c)
 	}
+}
+
+func iterate2(clientId *string, rkey *datastore.Key, c appengine.Context, op string) (error, *[]*datastore.Key, *[]appengine.BlobKey) {
+	var keys []*datastore.Key
+	var blobs []appengine.BlobKey
+	q := datastore.NewQuery(thumbnailLeaf)
+	if rkey != nil {
+		q = q.Ancestor(rkey)
+	}
+	thumbnails := q.Run(c)
+	for {
+		var thumbnail Thumbnail
+		key, err := thumbnails.Next(&thumbnail)
+		if err == datastore.Done {
+			break
+		}
+		if error2(err, c) { return err, &keys, &blobs }
+		if op == "send" {
+			c.Infof("pushing from db '%v'", thumbnail.ThumbnailURL)
+			channel.Send(c, *clientId, thumbnail.ThumbnailURL)
+		} else if op == "delete" {
+			c.Infof("deleting thumbnail from db '%v'", key)
+			err := image.DeleteServingURL(c, thumbnail.Blob)
+			error2(err, c)
+			keys = append(keys, key)
+			blobs = append(blobs, thumbnail.Blob)
+		}
+	}
+	return nil, &keys, &blobs
 }
 
 func start(w http.ResponseWriter, r *http.Request) {

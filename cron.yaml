@@ -1,0 +1,4 @@
+cron:
+- description: hourly data/blobstore cleanup job
+  url: /cleanup
+  schedule: every 60 mins

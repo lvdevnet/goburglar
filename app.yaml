@@ -14,6 +14,10 @@ handlers:
   script: _go_app
   login: admin
 
+- url: /cleanup
+  script: _go_app
+  login: admin
+
 - url: /_ah/channel/connected/
   script: _go_app
 
