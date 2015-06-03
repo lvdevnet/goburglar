@@ -276,12 +276,16 @@ func start(w http.ResponseWriter, r *http.Request) {
 	key, err := datastore.Put(c, datastore.NewIncompleteKey(c, rootNode, nil), &isr)
 	if error3(err, c, w) { return }
 
+	seen := make(map[string]struct{})
 	for _, image := range images {
 		addr := string(image[1])
 		if strings.Index(addr, "http") == 0 {
-			task := taskqueue.NewPOSTTask("/fetch", url.Values{"clientId": {clientId}, "image": {addr}, "key": {key.Encode()}})
-			_, err := taskqueue.Add(c, task, "default")
-			if error3(err, c, w) { return }
+			if _, ok := seen[addr]; !ok {
+				seen[addr] = struct{}{}
+				task := taskqueue.NewPOSTTask("/fetch", url.Values{"clientId": {clientId}, "image": {addr}, "key": {key.Encode()}})
+				_, err := taskqueue.Add(c, task, "default")
+				if error3(err, c, w) { return }
+			}
 		}
 	}
 
