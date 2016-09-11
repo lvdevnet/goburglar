@@ -370,27 +370,35 @@ func fetch(w http.ResponseWriter, r *http.Request) {
 
 	bucketName := bucket(c)
 	objName := fmt.Sprintf("%x", md5.Sum([]byte(imageUrl)))
-	log.Debugf(c, "creating blob %v/%v", bucketName, objName)
+	log.Debugf(c, "creating image GCS object %v/%v", bucketName, objName)
 	gcs, err := storage.NewClient(cc)
 	if error3(err, c, w) {
 		return
 	}
+	defer gcs.Close()
 	bucket := gcs.Bucket(bucketName)
 	obj := bucket.Object(objName)
 	blob := obj.NewWriter(cc)
 	blob.ContentType = resp.Header.Get("Content-Type")
 	blob.ACL = []storage.ACLRule{{storage.AllUsers, storage.RoleReader}}
+	log.Debugf(c, "writting GCS object %v/%v", bucketName, objName)
 	written, err := io.Copy(blob, resp.Body)
 	if error3(err, c, w) {
+		log.Infof(c, "image GCS object write failed, written %d bytes: deleting GCS object", written)
+		err = obj.Delete(cc)
+		error3(err, c, w)
 		return
 	}
 	err = blob.Close()
 	if error3(err, c, w) {
+		log.Infof(c, "image GCS object close failed: deleting GCS object")
+		err = obj.Delete(cc)
+		error3(err, c, w)
 		return
 	}
 	if written < 100 {
-		log.Infof(c, "image is too small: %v bytes; deleting", written)
-		err := obj.Delete(cc)
+		log.Infof(c, "image is too small: %d bytes; deleting GCS object", written)
+		err = obj.Delete(cc)
 		error3(err, c, w)
 		return
 	}
@@ -402,6 +410,9 @@ func fetch(w http.ResponseWriter, r *http.Request) {
 
 	thumbnailUrl, err := image.ServingURL(c, blobkey, &image.ServingURLOptions{Size: 100})
 	if error3(err, c, w) {
+		log.Infof(c, "image service failed: deleting GCS object")
+		err = obj.Delete(cc)
+		error3(err, c, w)
 		return
 	}
 	thumbnail := thumbnailUrl.String()
