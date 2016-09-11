@@ -248,12 +248,32 @@ func iterate2(clientId *string, rkey *datastore.Key, c appengine.Context, op str
 	return nil, &keys, &blobs
 }
 
+func startsWith(str string, search ...string) bool {
+	for _, s := range search {
+		if strings.Index(str, s) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+var _imgRx = regexp.MustCompile(`<img .*?src="(.*?)"`)
+
 func start(w http.ResponseWriter, r *http.Request) {
-	target := r.FormValue("target")
 	c := appengine.NewContext(r)
 
+	target := r.FormValue("target")
+	if !startsWith(target, "http:", "https:") {
+		target = "http://" + target
+	}
+	targetUrl, err := url.Parse(target)
+	if error3(err, c, w) {
+		return
+	}
+	host := fmt.Sprintf("%s://%s", targetUrl.Scheme, targetUrl.Host)
+
 	client := urlfetch.Client(c)
-	resp, err := client.Get("http://" + target)
+	resp, err := client.Get(target)
 	if error3(err, c, w) {
 		return
 	}
@@ -269,8 +289,7 @@ func start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rx, _ := regexp.Compile("<img .*? src=\"(.*?)\"")
-	images := rx.FindAllSubmatch(buf, len)
+	images := _imgRx.FindAllSubmatch(buf, len)
 	if images == nil {
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintf(w, "HTTP GET returned status %v\nNo images found\n\n", resp.Status)
@@ -305,15 +324,20 @@ func start(w http.ResponseWriter, r *http.Request) {
 
 	seen := make(map[string]struct{})
 	for _, image := range images {
-		addr := string(image[1])
-		if strings.Index(addr, "http") == 0 {
-			if _, ok := seen[addr]; !ok {
-				seen[addr] = struct{}{}
-				task := taskqueue.NewPOSTTask("/fetch", url.Values{"clientId": {clientId}, "image": {addr}, "key": {key.Encode()}})
-				_, err := taskqueue.Add(c, task, "default")
-				if error3(err, c, w) {
-					return
-				}
+		loc := string(image[1])
+		if !startsWith(loc, "http:", "https:") {
+			if startsWith(loc, "/") {
+				loc = host + loc
+			} else {
+				continue // not processing relative urls
+			}
+		}
+		if _, ok := seen[loc]; !ok {
+			seen[loc] = struct{}{}
+			task := taskqueue.NewPOSTTask("/fetch", url.Values{"clientId": {clientId}, "image": {loc}, "key": {key.Encode()}})
+			_, err := taskqueue.Add(c, task, "default")
+			if error3(err, c, w) {
+				return
 			}
 		}
 	}
