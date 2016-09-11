@@ -326,7 +326,9 @@ func start(w http.ResponseWriter, r *http.Request) {
 	for _, image := range images {
 		loc := string(image[1])
 		if !startsWith(loc, "http:", "https:") {
-			if startsWith(loc, "/") {
+			if startsWith(loc, "//") {
+				loc = fmt.Sprintf("%s:%s", targetUrl.Scheme, loc)
+			} else if startsWith(loc, "/") {
 				loc = host + loc
 			} else {
 				continue // not processing relative urls
