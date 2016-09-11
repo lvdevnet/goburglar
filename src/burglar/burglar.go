@@ -195,15 +195,21 @@ func iterate(clientId *string, c appengine.Context, cc context.Context, op strin
 		}
 	}
 	if op == "delete" {
-		bkt := bucket(c)
-		for _, filename := range allBlobs {
-			err := storage.DeleteObject(cc, bkt, filename)
+		bucketName := bucket(c)
+		gcs, err := storage.NewClient(cc)
+		if error2(err, c) {
+			return
+		}
+		bucket := gcs.Bucket(bucketName)
+		for _, objName := range allBlobs {
+			obj := bucket.Object(objName)
+			err := obj.Delete(cc)
 			error2(err, c)
 		}
 		if clientId != nil {
 			allKeys = append(allKeys, rkeys...)
 		}
-		err := datastore.DeleteMulti(c, allKeys) // deleting parent deletes ancestors? -- No
+		err = datastore.DeleteMulti(c, allKeys) // deleting parent deletes ancestors? -- No
 		error2(err, c)
 	}
 }
@@ -336,10 +342,16 @@ func fetch(w http.ResponseWriter, r *http.Request) {
 	}
 	c.Debugf("downloaded '%v'", imageUrl)
 
-	bkt := bucket(c)
-	filename := fmt.Sprintf("%x", md5.Sum([]byte(imageUrl)))
-	c.Debugf("creating blob %v/%v", bkt, filename)
-	blob := storage.NewWriter(cc, bkt, filename)
+	bucketName := bucket(c)
+	objName := fmt.Sprintf("%x", md5.Sum([]byte(imageUrl)))
+	c.Debugf("creating blob %v/%v", bucketName, objName)
+	gcs, err := storage.NewClient(cc)
+	if error3(err, c, w) {
+		return
+	}
+	bucket := gcs.Bucket(bucketName)
+	obj := bucket.Object(objName)
+	blob := obj.NewWriter(cc)
 	blob.ContentType = resp.Header.Get("Content-Type")
 	blob.ACL = []storage.ACLRule{{storage.AllUsers, storage.RoleReader}}
 	written, err := io.Copy(blob, resp.Body)
@@ -352,11 +364,12 @@ func fetch(w http.ResponseWriter, r *http.Request) {
 	}
 	if written < 100 {
 		c.Infof("image is too small: %v bytes; deleting", written)
-		storage.DeleteObject(cc, bkt, filename)
+		err := obj.Delete(cc)
+		error3(err, c, w)
 		return
 	}
 
-	blobkey, err := blobkey(filename, c)
+	blobkey, err := blobkey(objName, c)
 	if error3(err, c, w) {
 		return
 	}
@@ -370,7 +383,7 @@ func fetch(w http.ResponseWriter, r *http.Request) {
 	c.Debugf("pushing to client '%v'", thumbnail)
 	channel.Send(c, clientId, thumbnail)
 
-	ist := Thumbnail{thumbnail, filename}
+	ist := Thumbnail{thumbnail, objName}
 	_, err = datastore.Put(c, datastore.NewIncompleteKey(c, thumbnailLeaf, key), &ist)
 	if error3(err, c, w) {
 		return
