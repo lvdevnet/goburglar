@@ -1,14 +1,6 @@
 package burglar
 
 import (
-	"appengine"
-	"appengine/blobstore"
-	"appengine/channel"
-	"appengine/datastore"
-	"appengine/image"
-	"appengine/taskqueue"
-	"appengine/urlfetch"
-	"appengine/user"
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
@@ -16,7 +8,15 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-	newappengine "google.golang.org/appengine"
+	"google.golang.org/appengine"
+	"google.golang.org/appengine/blobstore"
+	"google.golang.org/appengine/channel"
+	"google.golang.org/appengine/datastore"
+	"google.golang.org/appengine/image"
+	"google.golang.org/appengine/log"
+	"google.golang.org/appengine/taskqueue"
+	"google.golang.org/appengine/urlfetch"
+	"google.golang.org/appengine/user"
 	"google.golang.org/cloud"
 	"google.golang.org/cloud/storage"
 	"html/template"
@@ -37,18 +37,18 @@ func init() {
 	http.HandleFunc("/cleanup", cleanup)
 }
 
-func error2(err error, c appengine.Context) bool {
+func error2(err error, c context.Context) bool {
 	if err != nil {
-		c.Errorf("%v", err.Error())
+		log.Errorf(c, "%v", err.Error())
 		return true
 	}
 	return false
 }
 
-func error3(err error, c appengine.Context, w http.ResponseWriter) bool {
+func error3(err error, c context.Context, w http.ResponseWriter) bool {
 	if err != nil {
 		msg := err.Error()
-		c.Errorf("%v", msg)
+		log.Errorf(c, "%v", msg)
 		http.Error(w, msg, http.StatusInternalServerError)
 		return true
 	}
@@ -71,16 +71,16 @@ const rootNode = "image-scrap-request"
 const thumbnailLeaf = "image-scrap-thumbnail"
 const rubbish = "rubbish"
 
-func bucket(c appengine.Context) string {
+func bucket(c context.Context) string {
 	return appengine.AppID(c) + ".appspot.com"
 }
 
-func blobkey(filename string, c appengine.Context) (appengine.BlobKey, error) {
+func blobkey(filename string, c context.Context) (appengine.BlobKey, error) {
 	return blobstore.BlobKeyForFile(c, fmt.Sprintf("/gs/%s/%s", bucket(c), filename))
 }
 
-func storagectx(c appengine.Context, r *http.Request) context.Context {
-	nc := newappengine.NewContext(r)
+func storagectx(c context.Context, r *http.Request) context.Context {
+	nc := appengine.NewContext(r)
 	h := &http.Client{
 		Transport: &oauth2.Transport{
 			Source: google.AppEngineTokenSource(nc, storage.ScopeFullControl),
@@ -109,7 +109,7 @@ func connected(w http.ResponseWriter, r *http.Request) {
 	clientId := r.FormValue("from")
 	c := appengine.NewContext(r)
 	cc := storagectx(c, r)
-	c.Infof("connected client '%v'", clientId)
+	log.Infof(c, "connected client '%v'", clientId)
 	images(clientId, c, cc)
 }
 
@@ -119,19 +119,19 @@ func reset(w http.ResponseWriter, r *http.Request) {
 		c := appengine.NewContext(r)
 		cc := storagectx(c, r)
 		clientId := cookie.Value
-		c.Infof("removing cookie of '%v'", clientId)
+		log.Infof(c, "removing cookie of '%v'", clientId)
 		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: rubbish, Expires: time.Unix(1, 0)})
 		delete(clientId, c, cc)
 	}
 	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 }
 
-func delete(clientId string, c appengine.Context, cc context.Context) {
-	c.Infof("deleting client '%v'", clientId)
+func delete(clientId string, c context.Context, cc context.Context) {
+	log.Infof(c, "deleting client '%v'", clientId)
 	iterate(&clientId, c, cc, "delete")
 }
 
-func gallery(token string, c appengine.Context, w http.ResponseWriter) {
+func gallery(token string, c context.Context, w http.ResponseWriter) {
 	if templates == nil {
 		var err error
 		templates, err = template.ParseFiles("templates/gallery.html")
@@ -143,19 +143,19 @@ func gallery(token string, c appengine.Context, w http.ResponseWriter) {
 	templates.ExecuteTemplate(w, "gallery.html", token)
 }
 
-func images(clientId string, c appengine.Context, cc context.Context) {
-	c.Infof("images for '%v'", clientId)
+func images(clientId string, c context.Context, cc context.Context) {
+	log.Infof(c, "images for '%v'", clientId)
 	iterate(&clientId, c, cc, "send")
 }
 
 func cleanup(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
 	cc := storagectx(c, r)
-	c.Infof("datastore and cloudstorage cleanup")
+	log.Infof(c, "datastore and cloudstorage cleanup")
 	iterate(nil, c, cc, "delete")
 }
 
-func iterate(clientId *string, c appengine.Context, cc context.Context, op string) {
+func iterate(clientId *string, c context.Context, cc context.Context, op string) {
 	var rkeys []*datastore.Key
 	var allKeys []*datastore.Key
 	var allBlobs []string
@@ -183,9 +183,9 @@ func iterate(clientId *string, c appengine.Context, cc context.Context, op strin
 		err, tkeys, blobs := iterate2(clientId, rkey, c, op)
 		if op == "delete" {
 			if rkey != nil {
-				c.Infof("deleting request from db '%v'", rkey)
+				log.Infof(c, "deleting request from db '%v'", rkey)
 			} else {
-				c.Infof("deleting all requests from db")
+				log.Infof(c, "deleting all requests from db")
 			}
 			allKeys = append(allKeys, *tkeys...)
 			allBlobs = append(allBlobs, *blobs...)
@@ -214,7 +214,7 @@ func iterate(clientId *string, c appengine.Context, cc context.Context, op strin
 	}
 }
 
-func iterate2(clientId *string, rkey *datastore.Key, c appengine.Context, op string) (error, *[]*datastore.Key, *[]string) {
+func iterate2(clientId *string, rkey *datastore.Key, c context.Context, op string) (error, *[]*datastore.Key, *[]string) {
 	var keys []*datastore.Key
 	var blobs []string
 	q := datastore.NewQuery(thumbnailLeaf)
@@ -232,10 +232,10 @@ func iterate2(clientId *string, rkey *datastore.Key, c appengine.Context, op str
 			return err, &keys, &blobs
 		}
 		if op == "send" {
-			c.Debugf("pushing from db '%v'", thumbnail.ThumbnailURL)
+			log.Debugf(c, "pushing from db '%v'", thumbnail.ThumbnailURL)
 			channel.Send(c, *clientId, thumbnail.ThumbnailURL)
 		} else if op == "delete" {
-			c.Infof("deleting thumbnail from db '%v'", key)
+			log.Infof(c, "deleting thumbnail from db '%v'", key)
 			blobkey, err := blobkey(thumbnail.Filename, c)
 			if !error2(err, c) {
 				err := image.DeleteServingURL(c, blobkey)
@@ -342,7 +342,7 @@ func start(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	c.Infof("setting cookie to '%v'", clientId)
+	log.Infof(c, "setting cookie to '%v'", clientId)
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: clientId})
 	gallery(token, c, w)
 }
@@ -353,7 +353,7 @@ func fetch(w http.ResponseWriter, r *http.Request) {
 
 	clientId := r.FormValue("clientId")
 	imageUrl := r.FormValue("image")
-	c.Debugf("fetching '%v'", imageUrl)
+	log.Debugf(c, "fetching '%v'", imageUrl)
 	key, err := datastore.DecodeKey(r.FormValue("key"))
 	if error3(err, c, w) {
 		return
@@ -364,11 +364,11 @@ func fetch(w http.ResponseWriter, r *http.Request) {
 	if error3(err, c, w) {
 		return
 	}
-	c.Debugf("downloaded '%v'", imageUrl)
+	log.Debugf(c, "downloaded '%v'", imageUrl)
 
 	bucketName := bucket(c)
 	objName := fmt.Sprintf("%x", md5.Sum([]byte(imageUrl)))
-	c.Debugf("creating blob %v/%v", bucketName, objName)
+	log.Debugf(c, "creating blob %v/%v", bucketName, objName)
 	gcs, err := storage.NewClient(cc)
 	if error3(err, c, w) {
 		return
@@ -387,7 +387,7 @@ func fetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if written < 100 {
-		c.Infof("image is too small: %v bytes; deleting", written)
+		log.Infof(c, "image is too small: %v bytes; deleting", written)
 		err := obj.Delete(cc)
 		error3(err, c, w)
 		return
@@ -404,7 +404,7 @@ func fetch(w http.ResponseWriter, r *http.Request) {
 	}
 	thumbnail := thumbnailUrl.String()
 
-	c.Debugf("pushing to client '%v'", thumbnail)
+	log.Debugf(c, "pushing to client '%v'", thumbnail)
 	channel.Send(c, clientId, thumbnail)
 
 	ist := Thumbnail{thumbnail, objName}
