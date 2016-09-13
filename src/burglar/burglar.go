@@ -114,16 +114,23 @@ func connected(w http.ResponseWriter, r *http.Request) {
 }
 
 func reset(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
 	cookie, err := r.Cookie(cookieName)
 	if err == nil && cookie != nil {
-		c := appengine.NewContext(r)
-		cc := storagectx(c, r)
 		clientId := cookie.Value
 		log.Infof(c, "removing cookie of '%v'", clientId)
 		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: rubbish, Expires: time.Unix(1, 0)})
+		task := taskqueue.NewPOSTTask("/reset", url.Values{"clientId": {clientId}})
+		_, err := taskqueue.Add(c, task, "")
+		if error3(err, c, w) {
+			cc := storagectx(c, r)
+			delete(clientId, c, cc)
+		}
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+	} else if clientId := r.FormValue("clientId"); clientId != "" {
+		cc := storagectx(c, r)
 		delete(clientId, c, cc)
 	}
-	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 }
 
 func delete(clientId string, c context.Context, cc context.Context) {
@@ -159,11 +166,10 @@ func iterate(clientId *string, c context.Context, cc context.Context, op string)
 	var rkeys []*datastore.Key
 	var allKeys []*datastore.Key
 	var allBlobs []string
-	q := datastore.NewQuery(rootNode)
+	q := datastore.NewQuery(rootNode).KeysOnly()
 	if clientId != nil { // not cleanup
 		q = q.Filter("ClientId = ", *clientId)
 	}
-	q = q.KeysOnly()
 	root := q.Run(c)
 	for {
 		key, err := root.Next(nil)
@@ -337,7 +343,7 @@ func start(w http.ResponseWriter, r *http.Request) {
 		if _, ok := seen[loc]; !ok {
 			seen[loc] = struct{}{}
 			task := taskqueue.NewPOSTTask("/fetch", url.Values{"clientId": {clientId}, "image": {loc}, "key": {key.Encode()}})
-			_, err := taskqueue.Add(c, task, "default")
+			_, err := taskqueue.Add(c, task, "")
 			if error3(err, c, w) {
 				return
 			}
