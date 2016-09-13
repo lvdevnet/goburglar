@@ -60,8 +60,8 @@ type Request struct {
 }
 
 type Thumbnail struct {
-	ThumbnailURL string
-	Filename     string
+	ThumbnailURL string `datastore:",noindex"`
+	Filename     string `datastore:",noindex"`
 }
 
 var templates *template.Template = nil
@@ -163,10 +163,10 @@ func iterate(clientId *string, c context.Context, cc context.Context, op string)
 	if clientId != nil { // not cleanup
 		q = q.Filter("ClientId = ", *clientId)
 	}
+	q = q.KeysOnly()
 	root := q.Run(c)
 	for {
-		var parent Request
-		key, err := root.Next(&parent)
+		key, err := root.Next(nil)
 		if err == datastore.Done {
 			break
 		}
